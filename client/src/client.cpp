@@ -9,14 +9,18 @@
 using namespace std;
 
 #define PORT 3000
-#define BUFFERSIZE 100
+#define BUFFERSIZE 1024
 
 int main(int argv, char** argc)
 {
-    char sendBuf[BUFFERSIZE];
+    fd_set rfds;
     char recvBuf[BUFFERSIZE];
+    char sendBuf[BUFFERSIZE];
+    int maxfd, retval;
+    struct timeval tv;
     int client = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in serverAddr;
+    int len;
 
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
@@ -25,25 +29,66 @@ int main(int argv, char** argc)
     // server IP
     serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    if(connect(client, (struct sockaddr *)&serverAddr, sizeof(serverAddr)))
+    if(connect(client, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0)
     {
         printf("Error while connecting to server.\n");
         exit(1);
     }
 
-    while(fgets(sendBuf, sizeof(sendBuf), stdin) != NULL)
+    while(1)
     {
-        // send message
-        send(client, sendBuf, strlen(sendBuf), 0);
+        // clear bits in rfds
+        FD_ZERO(&rfds);
+        // insert stdin to rfds
+        FD_SET(0, &rfds);
+        // insert socket to rfds
+        FD_SET(client, &rfds);
 
-        if(strcmp(sendBuf, "exit\n") == 0)
+        maxfd = 0;
+        if(maxfd < client)
         {
-            break;
+            maxfd = client;
         }
 
-        // receive message
-        recv(client, recvBuf, sizeof(recvBuf), 0);
-        fputs(recvBuf, stdout);
+        // set the timeout value
+        tv.tv_sec = 5;
+        tv.tv_usec = 0;
+
+        // waiting chat
+        retval = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+        if(retval == -1)
+        {
+            printf("Error while select.\n");
+            break;
+        }
+        else if(retval > 0)
+        {
+            if(FD_ISSET(client, &rfds))
+            {
+                len = recv(client, recvBuf,sizeof(recvBuf), 0);
+                fputs(recvBuf, stdout);
+                if(strcmp(recvBuf, "exit\n") == 0)
+                {
+                    exit(0);
+                }
+                memset(recvBuf, 0, sizeof(recvBuf));
+            }
+
+            if(FD_ISSET(0, &rfds))
+            {
+                fgets(sendBuf, sizeof(sendBuf), stdin);
+                send(client, sendBuf, strlen(sendBuf), 0);
+                if(strcmp(sendBuf, "exit\n") == 0)
+                {
+                    exit(0);
+                }
+                memset(sendBuf, 0, sizeof(sendBuf));
+            }
+        }
+        else
+        {
+            continue;
+        }
     }
 
     close(client);
