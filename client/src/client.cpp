@@ -5,22 +5,70 @@
 #include <netinet/in.h>
 #include <arpa/inet.h> // to include struct sockaddr_in
 #include <unistd.h> // to include socket close method
+#include <pthread.h>
+#include <errno.h>
 
 using namespace std;
 
 #define PORT 3000
 #define BUFFERSIZE 1024
 
+void* recvSocket(void *ptr)
+{
+    pthread_detach(pthread_self());
+    int fd = *(int *)ptr;
+    char str[BUFFERSIZE];
+
+    while(1)
+    {
+        memset(str, 0, sizeof(str));
+
+        int bytes = recv(fd, str, sizeof(str), 0);
+        if(bytes <= 0)
+        {
+            break;
+        }
+
+        if(strcmp(str, "exit\n") == 0)
+        {
+            break;
+        }
+        printf("%s", str);
+    }
+
+    exit(0);
+    return NULL;
+}
+
+void* sendSocket(void *ptr)
+{
+    pthread_detach(pthread_self());
+    int fd = *(int *)ptr;
+    char str[BUFFERSIZE];
+
+    while(1)
+    {
+        memset(str, 0, sizeof(str));
+        // get input from stdin
+        read(STDIN_FILENO, str, sizeof(str));
+        if(strcmp(str, "exit\n") == 0)
+        {
+            break;
+        }
+        // send message to server
+        send(fd, str, strlen(str), 0);
+    }
+
+    exit(0);
+    return NULL;
+}
+
 int main(int argv, char** argc)
 {
-    fd_set rfds;
-    char recvBuf[BUFFERSIZE];
-    char sendBuf[BUFFERSIZE];
-    int maxfd, retval;
-    struct timeval tv;
     int client = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in serverAddr;
-    int len;
+    pthread_t thread1, thread2;
+    void *status1, *status2;
 
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
@@ -35,61 +83,12 @@ int main(int argv, char** argc)
         exit(1);
     }
 
-    while(1)
-    {
-        // clear bits in rfds
-        FD_ZERO(&rfds);
-        // insert stdin to rfds
-        FD_SET(0, &rfds);
-        // insert socket to rfds
-        FD_SET(client, &rfds);
+    pthread_create(&thread1, NULL, recvSocket, &client);
+    pthread_create(&thread2, NULL, sendSocket, &client);
 
-        maxfd = 0;
-        if(maxfd < client)
-        {
-            maxfd = client;
-        }
-
-        // set the timeout value
-        tv.tv_sec = 5;
-        tv.tv_usec = 0;
-
-        // waiting chat
-        retval = select(maxfd + 1, &rfds, NULL, NULL, &tv);
-        if(retval == -1)
-        {
-            printf("Error while select.\n");
-            break;
-        }
-        else if(retval > 0)
-        {
-            if(FD_ISSET(client, &rfds))
-            {
-                len = recv(client, recvBuf,sizeof(recvBuf), 0);
-                fputs(recvBuf, stdout);
-                if(strcmp(recvBuf, "exit\n") == 0)
-                {
-                    exit(0);
-                }
-                memset(recvBuf, 0, sizeof(recvBuf));
-            }
-
-            if(FD_ISSET(0, &rfds))
-            {
-                fgets(sendBuf, sizeof(sendBuf), stdin);
-                send(client, sendBuf, strlen(sendBuf), 0);
-                if(strcmp(sendBuf, "exit\n") == 0)
-                {
-                    exit(0);
-                }
-                memset(sendBuf, 0, sizeof(sendBuf));
-            }
-        }
-        else
-        {
-            continue;
-        }
-    }
+    // pthread_join(thread1, &status1);
+    // pthread_join(thread2, &status2);
+    pthread_exit(0);
 
     close(client);
 
